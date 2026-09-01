@@ -1,0 +1,304 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CloudCost - AWS-only cost and resource monitoring platform. No Docker/ECS/ECR/Kubernetes.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloudcost
+  AppRegion:
+    Type: String
+    Default: ap-south-1
+  CORSOrigin:
+    Type: String
+    Default: '*'
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        AWS_REGION_NAME: !Ref AppRegion
+        CORS_ORIGIN: !Ref CORSOrigin
+        SNAPSHOT_TABLE: !Ref SnapshotTable
+        ALERT_TOPIC_ARN: !Ref AlertTopic
+
+Resources:
+  CloudCostApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      StageName: prod
+      Cors:
+        AllowOrigin: !Sub "'${CORSOrigin}'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'GET,OPTIONS'"
+
+  CloudCostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-api'
+      CodeUri: ../backend/
+      Handler: lambda_handler.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - ce:GetCostForecast
+                - ce:GetDimensionValues
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - budgets:ViewBudget
+                - budgets:DescribeBudgets
+                - budgets:DescribeBudgetActionsForBudget
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:DescribeRegions
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - rds:DescribeDBInstances
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - s3:ListAllMyBuckets
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - lambda:ListFunctions
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - cloudfront:ListDistributions
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricStatistics
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - cloudtrail:DescribeTrails
+                - cloudtrail:GetTrailStatus
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - iam:GetAccountSummary
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - wafv2:ListWebACLs
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - sts:GetCallerIdentity
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+              Resource: !GetAtt SnapshotTable.Arn
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref AlertTopic
+      Events:
+        Dashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/dashboard
+            Method: get
+        Cost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/cost
+            Method: get
+        Resources:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/resources
+            Method: get
+        Monitoring:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/monitoring
+            Method: get
+        Security:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/security
+            Method: get
+        Budgets:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCostApi
+            Path: /api/budgets
+            Method: get
+
+  SnapshotTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-snapshots'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: snapshot_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: snapshot_type
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-alerts'
+      DisplayName: CloudCost Alerts
+
+  ScheduledRefreshRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-refresh'
+      Description: Refresh CloudCost AWS snapshot every six hours.
+      ScheduleExpression: rate(6 hours)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt CloudCostFunction.Arn
+          Id: CloudCostRefreshTarget
+          Input: '{"source":"aws.events","detail-type":"scheduled-refresh"}'
+
+  ScheduledRefreshPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CloudCostFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledRefreshRule.Arn
+
+  CloudCostBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-oac'
+        Description: CloudCost S3 origin access control
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudCostWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${ProjectName}-waf'
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: CloudCostWAF
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: AWSManagedCommonRules
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: CloudCostCommonRules
+            SampledRequestsEnabled: true
+
+  CloudCostDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: CloudCost AWS dashboard
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        WebACLId: !GetAtt CloudCostWebACL.Arn
+        Origins:
+          - Id: CloudCostS3Origin
+            DomainName: !GetAtt CloudCostBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: CloudCostS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+  CloudCostBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudCostBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${CloudCostBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudCostDistribution}'
+
+Outputs:
+  ApiUrl:
+    Description: CloudCost API Gateway endpoint
+    Value: !Sub 'https://${CloudCostApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  FrontendBucket:
+    Description: S3 bucket for the CloudCost frontend
+    Value: !Ref CloudCostBucket
+  CloudFrontDomain:
+    Description: CloudFront distribution domain
+    Value: !GetAtt CloudCostDistribution.DomainName
+  AlertTopicArn:
+    Description: SNS topic for CloudCost alerts
+    Value: !Ref AlertTopic
+  SnapshotTableName:
+    Description: DynamoDB snapshot table
+    Value: !Ref SnapshotTable
