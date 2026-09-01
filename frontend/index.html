@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CloudCost AWS Cloud Cost & Resource Monitoring Platform" />
+  <title>CloudCost — AWS Dashboard</title>
+  <link rel="stylesheet" href="./css/style.css" />
+  <script defer src="./js/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">☁</div>
+        <div>
+          <div class="brand-name">CloudCost</div>
+          <div class="brand-subtitle">AWS Cloud Dashboard</div>
+        </div>
+      </div>
+      <nav class="side-nav" aria-label="Main navigation">
+        <a href="#dashboard" data-route="dashboard" class="nav-item active"><span>▣</span>Dashboard</a>
+        <a href="#cost-explorer" data-route="cost-explorer" class="nav-item"><span>◫</span>Cost Explorer</a>
+        <a href="#cost-by-service" data-route="cost-by-service" class="nav-item"><span>◌</span>Cost by Service</a>
+        <a href="#resources" data-route="resources" class="nav-item"><span>◉</span>Resources</a>
+        <a href="#budgets-alerts" data-route="budgets-alerts" class="nav-item"><span>◈</span>Budgets & Alerts</a>
+        <a href="#reports" data-route="reports" class="nav-item"><span>▤</span>Reports</a>
+        <a href="#monitoring" data-route="monitoring" class="nav-item"><span>◒</span>Monitoring</a>
+        <a href="#security" data-route="security" class="nav-item"><span>◍</span>Security</a>
+        <a href="#settings" data-route="settings" class="nav-item"><span>⚙</span>Settings</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="month-card"><span>Current Month</span><strong>May 2025</strong><span class="calendar-icon">▣</span></div>
+        <div class="profile-card"><div class="avatar">N</div><div><strong>Nitin Rathod</strong><span>Admin</span></div></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Dashboard</h1>
+          <p id="page-subtitle">Welcome back, Nitin 👋</p>
+        </div>
+        <div class="top-actions">
+          <select id="period-select" class="period-select" aria-label="Date period">
+            <option>This Month</option>
+            <option>Last 30 Days</option>
+            <option>Last 90 Days</option>
+          </select>
+          <button class="icon-btn" title="Notifications" aria-label="Notifications">♧<span class="notif-dot"></span></button>
+          <button class="icon-btn" id="refresh-btn" title="Refresh data" aria-label="Refresh data">↻</button>
+          <div class="updated">Last updated: <span id="updated-time">2 mins ago</span></div>
+        </div>
+      </header>
+      <section id="app-view" aria-live="polite"></section>
+    </main>
+  </div>
+</body>
+</html>
